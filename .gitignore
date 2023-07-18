@@ -1,0 +1,11 @@
+
+# Jai build directories
+.build/
+
+# Ignore the test data for now, we should commit it once this is done though
+input/
+output/
+
+# binary files
+*.exe
+*.pdb
