@@ -109,34 +109,36 @@ parse_block_none :: (state: *Parse_State, output_buffer: *[..] u8) -> success: b
         if !position_bounds_check(state) then return false;
     }
 
-    // TODO: are these bounds checks even in the right place? i feel like we are reading the bytes then looking to see if we overran the buffer...
-    len  := big_endian_to_little_endian(state.input_buffer.data + state.byte, u16); // TODO: I think this is wrong, mutli-byte numbers in the spec are little endian!
-    state.byte += 2;
-    if !position_bounds_check(state) return false;
+    new_state := <<state;
+    new_state.byte += 2;  // Lets pretend we are at the end of the len, are we out of bounds?
+    if !position_bounds_check(*new_state) return false;
+    len: u16 = (cast(u16)state.input_buffer[state.byte]) + ((cast(u16)state.input_buffer[state.byte + 1]) << 8);
+    state.byte += 2; // Now we move forward since we read it
 
-    nlen := big_endian_to_little_endian(state.input_buffer.data + state.byte, u16); // TODO: I think this is wrong, mutli-byte numbers in the spec are little endian!
-    state.byte += 2;
-    if !position_bounds_check(state) return false;
+    new_state.byte += 2;  // Lets pretend we are at the end of the len, are we out of bounds?
+    if !position_bounds_check(*new_state) return false;
+    nlen: u16 = (cast(u16)state.input_buffer[state.byte]) + ((cast(u16)state.input_buffer[state.byte + 1]) << 8);
+    state.byte += 2; // Now we move forward since we read it
 
     if len != ~nlen {
         log_error("GZIP   [ERROR]: invalid block data, length did not match nlength");
         return false;
     }
 
-    new_state := <<state;
     new_state.byte += len; // Lets pretend we are at the end of the block, are we out of bounds?
     if !position_bounds_check(*new_state) return false;
 
-    for i: 0..len-1 { // -1 because jai arrays are inclusive
+    for i: 0..(cast(s16)len)-1 { // -1 because jai arrays are inclusive
         array_add(output_buffer, state.input_buffer[state.byte + i]);
     }
+    state.byte += len; // Now that we have read the bytes, move forward in the buffer
 
     return true;
 }
 
 parse_block_fixed :: (state: *Parse_State, output_buffer: *[..] u8) -> success: bool {
     lengths :: #run create_static_lengths_array();
-    success, root := create_huffman_tree(lengths); // We could do this at compile time if we didnt allocate the tree on the heap. It certainly would save needing to make the tree for each FIXED block. but how often are those used and will it really save all that much?
+    success, root := create_huffman_tree(lengths, 15); // We could do this at compile time if we didnt allocate the tree on the heap. It certainly would save needing to make the tree for each FIXED block. but how often are those used and will it really save all that much?
     if !success then return false;
     defer { destroy_huffman_tree(root); }; // If we successfully made the huffman tree, we need to de-allocate it before we leave this scope
 
@@ -162,19 +164,16 @@ parse_block_fixed :: (state: *Parse_State, output_buffer: *[..] u8) -> success: 
         if is_litteral_byte(code) {
             // write the byte from the code to the output buffer
             array_add(output_buffer, cast(u8)code);
-            log("added_byte: %", code); // TODO: remove me
         }
         else if is_length_code(code) {
             success, length := get_length_from_code(code, state);
             if !success then return false;
-            log("length: %", length); // TODO: remove me
 
             // the next 5 bits should be the distance code
             success=, distance_code := accumulate_bits(5, state);
             distance_code = invert_bits(distance_code, 5); // TODO: This seems to be correct, but is it? and if it is, why is reading the other things without this correct?
 
             if !success then return false;
-            log("dist_code: %", distance_code); // TODO: remove me
 
             if !is_distance_code(xx distance_code) {
                 log_error("GZIP   [ERROR]: invalid block data, found invalid distance code (%)", distance_code);
@@ -183,12 +182,200 @@ parse_block_fixed :: (state: *Parse_State, output_buffer: *[..] u8) -> success: 
 
             success=, distance := get_distance_from_code(distance_code, state);
             if !success then return false;
-            log("distance: %", distance); // TODO: remove me
 
             success = copy_bytes_from_distance(output_buffer, length, distance);
             if !success then return false;
         }
     }
+
+    return true;
+}
+
+parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
+    // Get the HLIT (the number of litteral/length codes minus 257)
+    success, hlit := accumulate_bits(5, state);
+    if !success then return false;
+    hlit += 257; // Add back that 257 to the decoded value
+
+    if hlit < 257 || hlit > 286 {
+        log_error("GZIP   [ERROR]: unexpected value in dynamic block, HLIT was expected to be in the range [257-287) (HLIT: %)", hlit);
+        return false;
+    }
+
+    // Get the HDIST (the number of distance codes minus 1)
+    success=, hdist := accumulate_bits(5, state);
+    if !success then return false;
+    hdist += 1; // Add back that 1 to the decoded value
+
+    if hdist < 1 || hdist > 32 {
+        log_error("GZIP   [ERROR]: unexpected value in dynamic block, HDIST was expected to be in the range [1-33) (HDIST: %)", hdist);
+        return false;
+    }
+
+    // Get the HCLEN (the number of code lengths minus 4)
+    success=, hclen := accumulate_bits(4, state);
+    if !success then return false;
+    hclen += 4; // Add back that 4 to the decoded value
+
+    if hclen < 4 || hclen > 19 {
+        log_error("GZIP   [ERROR]: unexpected value in dynamic block, HCLEN was expected to be in the range [4-20) (HCLEN: %)", hclen);
+        return false;
+    }
+
+    // The code lengths are stored in a perticular order, as stated in https://www.rfc-editor.org/rfc/rfc1951.txt section 3.2.7
+    code_length_order: [19] u8 : .[ 16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15 ];
+    code_lengths_for_the_code_length_alphabet: [19] u8; // 19 is the max, but we will only use HCLEN out of the 19 slots
+
+    for i: 0..hclen-1 { // -1 because jai for loops are inclusive
+        success=, length := accumulate_bits(3, state);
+        if !success then return false;
+
+        code_lengths_for_the_code_length_alphabet[code_length_order[i]] = cast(u8)length;
+    }
+
+    success=, root := create_huffman_tree(code_lengths_for_the_code_length_alphabet, 7);
+    if !success then return false;
+
+    // The repeat codes can use the data from the code lengths even in the distance codes section.
+    // This means that there is effectivly one block of compressed code data (containing both length
+    // and distance codes). The length of this block then, is our ajusted HLIT (HLIT + 257) plus our
+    // adjusted HDIST (HDIST + 1) values. Each value being a variable length based on the huffman code
+    // used. In other words, we need to loop HLIT + HDIST (using our adjusted values) times to have
+    // gotten all the codes.
+    // ref: https://www.rfc-editor.org/rfc/rfc1951.txt section 3.2.7 (at the bottom just before the "compliance" section)
+
+    // This will be the array holding the whole block of data described above. Meaning
+    // it will be a single array, the front section holding the code lengths for the
+    // litterals, and the back section holding the code lengths for the distances.
+    combined_code_lengths := NewArray(hlit + hdist, u8);
+    i := 0;
+    total := (hlit + hdist);
+
+    while i < total {
+        leaf := find_huffman_code(root, (user_data: *void) -> bit: u8, success: bool {
+            bit, success := get(xx user_data);
+            return bit, success;
+        }, state);
+        if leaf == null then return false;
+
+        code := leaf.code;
+        if !is_code_length_code(code) {
+            log_error("GZIP   [ERROR]: invalid block data, found an invalid code length code in block (code: %)", code);
+            return false;
+        }
+
+        // This is just to catch the edge case that we see a repeat code before we have seen any data to repeat
+        if i == 0 && code == 16 {
+            log_error("GZIP   [ERROR]: invalid block data, found repeat code without having seen any other codes previously");
+            return false;
+        }
+
+        if code >= 0 && code <= 15 {
+            // This is a litteral code, we can just plop the value into our buffer
+            combined_code_lengths[i] = xx code;
+            i += 1; // we added a code, so increment our index
+        }
+        else if code == 16 {
+            // This is the repeat code, we need to read some bits and then repeat
+            //  the last code we saw that number of times
+            success=, repeat_count := accumulate_bits(2, state);
+            if !success then return false;
+            repeat_count += 3; // The repeat count is stored as repeat_count minus 3, so we need to add that back in
+
+            for 0..repeat_count-1 { // -1 because jai for loops are inclusive
+                if i >= total {
+                    log_error("GZIP   [ERROR]: invalid block data, repeat code would cause too many codes");
+                    return false;
+                }
+                combined_code_lengths[i] = combined_code_lengths[i - 1];
+                i += 1; // we added a code, so increment our index
+            }
+        }
+        else if code == 17 || code == 18 {
+            // code 17 tells us to copy 0's 3-10 times
+            // code 18 tells us to copy 0's 11-138 times
+            extra_bits: u8 = ifx code == 17 then cast(u8)3 else cast(u8)7;
+            offset: u8 = ifx code == 17 then cast(u8)3 else cast(u8)11;
+            success=, repeat_count := accumulate_bits(extra_bits, state);
+            if !success then return false;
+            repeat_count += offset; // The repeat count is stored with an offset, make sure to add that back in
+
+            for 0..repeat_count-1 { // -1 because jai for loops are inclusive
+                if i >= total {
+                    log_error("GZIP   [ERROR]: invalid block data, repeat code would cause too many codes");
+                    return false;
+                }
+                combined_code_lengths[i] = 0;
+                i += 1; // we added a code, so increment our index
+            }
+        }
+    }
+
+    // now we can split the arrays up to work on them separately
+    litteral_code_lengths := array_view(combined_code_lengths, 0, hlit);
+    distance_code_lengths := array_view(combined_code_lengths, hlit, hdist);
+
+    destroy_huffman_tree(root); // We no longer need that tree data
+    root = null; // We should not be using root below this point
+
+    success=, litteral_lengths_root := create_huffman_tree(litteral_code_lengths, 15);
+    if !success then return false;
+
+    success=, distance_lengths_root := create_huffman_tree(distance_code_lengths, 15);
+    if !success then return false;
+
+    // All of the above, was just to get us the data to be able to decode the real data.
+    // We start decoding the real data below this point...
+
+    while true {
+        leaf := find_huffman_code(litteral_lengths_root, (user_data: *void) -> bit: u8, success: bool {
+            bit, success := get(xx user_data);
+            return bit, success;
+        }, state);
+
+        if leaf == null then return false;
+
+        code := leaf.code;
+        if !is_in_alphabet(code) {
+            log_error("GZIP   [ERROR]: invalid block data, found an invalid huffman code in block (code: %)", code);
+            return false;
+        }
+
+        // If we see the end-of-block symbol, we can stop looping, we are done
+        if is_end_of_block_symbol(code) then break;
+
+        if is_litteral_byte(code) {
+            // write the byte from the code to the output buffer
+            array_add(output_buffer, cast(u8)code);
+        }
+        else if is_length_code(code) {
+            success, length := get_length_from_code(code, state);
+            if !success then return false;
+
+            // the next 5 bits should be the distance code
+            distance_code_leaf := find_huffman_code(distance_lengths_root, (user_data: *void) -> bit: u8, success: bool {
+                bit, success := get(xx user_data);
+                return bit, success;
+            }, state);
+            if distance_code_leaf == null then return false;
+
+            distance_code := distance_code_leaf.code;
+
+            if !is_distance_code(distance_code) {
+                log_error("GZIP   [ERROR]: invalid block data, found invalid distance code (%)", distance_code);
+                return false;
+            }
+
+            success=, distance := get_distance_from_code(xx distance_code, state);
+            if !success then return false;
+
+            success = copy_bytes_from_distance(output_buffer, length, distance);
+            if !success then return false;
+        }
+    }
+
+    destroy_huffman_tree(litteral_lengths_root); // We no longer need the tree data
+    destroy_huffman_tree(distance_lengths_root); // We no longer need the tree data
 
     return true;
 }
@@ -269,10 +456,6 @@ invert_bits :: (bits: u16, number: u16) -> u16 {
     return acc;
 }
 
-parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
-    return false;
-}
-
 is_in_alphabet :: (value: s16) -> bool {
     return value >= 0 && value <= 285;
 }
@@ -291,6 +474,10 @@ is_length_code :: (value: s16) -> bool {
 
 is_distance_code :: (value: s16) -> bool {
     return value >= 0 && value <= 29;
+}
+
+is_code_length_code :: (value: s16) -> bool {
+    return value >= 0 && value <= 18;
 }
 
 // TODO: We might not need this function, re-eval when the restructuring is done

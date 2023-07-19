@@ -87,14 +87,6 @@ Operating_System_Type :: enum u8 {
 //     - Steven Savold (July 16th, 2023)
 //
 
-// TODO:
-// We probably should restructure this whole module to use mutliple files
-// Im imagining a deflate.jai, inflate.jai (for when we evenually do compression),
-// and gzip.jai (and maybe a zip.jai if we want to tackle zip formats too). 
-// This way we split the formats apart and can just #load everything in the 
-// module.jai file.
-//
-
 
 unzip :: (content: [] u8) -> (success: bool, unziped_content: [] u8, header: Header, footer: Footer) {
     success, header, bytes_read := parse_gzip_header(content);
@@ -105,7 +97,7 @@ unzip :: (content: [] u8) -> (success: bool, unziped_content: [] u8, header: Hea
     body := array_view(content, bytes_read);
     success=, inflated_content := inflate(body);
 
-    return true, inflated_content, header, .{}; // TODO: Footer is not being parsed yet
+    return success, inflated_content, header, .{}; // TODO: Footer is not being parsed yet
 }
 
 unzip :: (filename: string) -> (success: bool, unziped_content: [] u8, header: Header, footer: Footer) {
@@ -129,8 +121,7 @@ unzip :: (filename: string) -> (success: bool, unziped_content: [] u8, header: H
 #scope_file
 magic_number: u16 : 0x1f_8b;
 
-// Parses the header of a Gzip file, header and body_start are only valid if success is true.
-// body_start represents the first byte after the payload ended.
+// Parses the header of a Gzip file, header and bytes_read are only valid if success is true.
 parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_read: s64) {
     bytes_read := 0;
     if content.count < 10 {
@@ -186,7 +177,8 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
             return false, .{}, bytes_read;
         }
 
-        extra_length = big_endian_to_little_endian(byte, type_of(extra_length)); // TODO: is this incorrect? timestamp was little endian...
+        // TODO: is this incorrect? timestamp was little endian...
+        extra_length = big_endian_to_little_endian(byte, type_of(extra_length));
         byte += size_of(type_of(extra_length));
         bytes_read += size_of(type_of(extra_length));
 
@@ -216,7 +208,8 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
         }
 
         if !success {
-            log_error("GZIP   [ERROR]: FNAME flag was set, but we ran out of file data before the name could finish being read"); // TODO: This error message could probably be worded better...
+            // TODO: This error message could probably be worded better...
+            log_error("GZIP   [ERROR]: FNAME flag was set, but we ran out of file data before the name could finish being read");
             return false, .{}, bytes_read;
         }
 
@@ -240,7 +233,8 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
         }
 
         if !success {
-            log_error("GZIP   [ERROR]: FCOMMENT flag was set, but we ran out of file data before the comment could finish being read"); // TODO: This error message could probably be worded better...
+            // TODO: This error message could probably be worded better...
+            log_error("GZIP   [ERROR]: FCOMMENT flag was set, but we ran out of file data before the comment could finish being read");
             return false, .{}, bytes_read;
         }
 

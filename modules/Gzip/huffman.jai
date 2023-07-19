@@ -4,7 +4,7 @@
 // Also, if when building the tree, we encounter an error, the tree will be freed and will require the
 // allocator be able to at least ignore the requests to free the nodes
 //
-create_huffman_tree :: (code_lengths: [] u8, max_huffman_code_length: u8 = 15) -> success: bool, tree: *Huffman_Node {
+create_huffman_tree :: (code_lengths: [] u8, max_huffman_code_length: u8) -> success: bool, tree: *Huffman_Node {
     if code_lengths.count > 288 {
         log_error("GZIP   [ERROR]: unable to build huffman tree, expected code_lengths.count to be less then 288");
         return false, null;
@@ -19,22 +19,23 @@ create_huffman_tree :: (code_lengths: [] u8, max_huffman_code_length: u8 = 15) -
     for codes {
         current_node := root;
 
-        for j: 0..it.length-1 { // -1 because jai for loops are inclusive
-            bit: u16 = (it.code >> cast(u16)(it.length - j - 1)) & 1; // Get the bits from left to right (most signifigant to least signifigant)
+        for j: 0..(cast(s8)it.length)-1 { // -1 because jai for loops are inclusive
+            bit: u16 = (it.code >> cast(u16)(cast(s8)it.length - j - 1)) & 1; // Get the bits from left to right (most signifigant to least signifigant)
             child: **Huffman_Node = ifx bit then *current_node.right else *current_node.left; // Grab a reference to the child we will want to operate on
 
             // The formatting of this if statment is ugly, but I think it will help to allow the comments to explain what this is checking for...
-            if  ((j == it.length - 1) && (<<child != null)) || // If we are on the last bit and there is already a node here... We have doubled up and the tree is invalid
-                ((j != it.length - 1) && (<<child != null) && ((<<child).code != -1) ) // If we have hit a terminating (leaf) node in the tree, we have a substring in our patten that is ambiguaous and the tree is invalid
+            if  ((j == cast(s8)it.length - 1) && ((<<child) != null)) || // If we are on the last bit and there is already a node here... We have doubled up and the tree is invalid
+                ((j != cast(s8)it.length - 1) && ((<<child) != null) && ((<<child).code != -1) ) // If we have hit a terminating (leaf) node in the tree, we have a substring in our patten that is ambiguaous and the tree is invalid
             {
                 destroy_huffman_tree(root);
+                log_error("GZIP   [ERROR]: unable to build huffman tree, an ambiguity was encountered durring construction");
                 return false, null;
             }
 
-            if <<child == null then
-                <<child = New(Huffman_Node);
+            if (<<child) == null then
+                (<<child) = New(Huffman_Node);
 
-            if j == it.length - 1 then
+            if j == cast(s8)it.length - 1 then
                 (<<child).code = xx it_index;
 
             current_node = <<child; // Move our current_node reference down the tree

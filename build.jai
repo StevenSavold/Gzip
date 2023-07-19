@@ -43,6 +43,9 @@
     // Setup optimizations
     set_optimization(*options, optimization_level);
 
+    // Turn on arithmetic overflow warning!
+    options.arithmetic_overflow_check = ifx is_release_mode then .NONFATAL else .FATAL; // I prefer my warnings as errors, but in release mode we can just leave them as warnings
+
     // Create the workspace which will build the actual executable
     workspace := compiler_create_workspace(options.output_executable_name);
     set_build_options(options, workspace);
