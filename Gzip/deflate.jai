@@ -142,8 +142,6 @@ parse_block_fixed :: (state: *Parse_State, output_buffer: *[..] u8) -> success: 
     if !success then return false;
     defer { destroy_huffman_tree(root); }; // If we successfully made the huffman tree, we need to de-allocate it before we leave this scope
 
-    // TODO: Depending on how actually similar the code is between dynamic and static compression, maybe this whole
-    //       loop can be in its own function that is shared between the two decompression routines
     while true {
         leaf := find_huffman_code(root, (user_data: *void) -> bit: u8, success: bool {
             bit, success := get(xx user_data);
@@ -478,20 +476,6 @@ is_distance_code :: (value: s16) -> bool {
 
 is_code_length_code :: (value: s16) -> bool {
     return value >= 0 && value <= 18;
-}
-
-// TODO: We might not need this function, re-eval when the restructuring is done
-// At the very least this is used to parse the gzip header...
-big_endian_to_little_endian :: (big_endian: *void, $T: Type) -> T {
-    #assert type_info(T).type == .INTEGER "Type must be an integer type";
-    output: T;
-
-    ti := type_info(T);
-    for i: 0..ti.runtime_size-1 {
-        output |= (cast(T)(<<((cast(*u8)big_endian) + i))) << (((ti.runtime_size - 1) - i) * 8);
-    }
-
-    return output;
 }
 
 

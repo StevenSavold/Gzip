@@ -19,7 +19,6 @@ Header :: struct {
     crc16: u16;        // If FHCRC is set in the flags, this will be the given crc16 result
 }
 
-// TODO: Implement checking and parsing the footer
 Footer :: struct {
     crc32: u32; // This is the Cyclic Redundancy Check value of the uncompressed data commputed
                 // according to CRC-32 algorithm used in the ISO 3309 standard
@@ -96,8 +95,11 @@ unzip :: (content: [] u8) -> (success: bool, unziped_content: [] u8, header: Hea
 
     body := array_view(content, bytes_read);
     success=, inflated_content := inflate(body);
+    if !success return false, .[], .{}, .{};
 
-    return success, inflated_content, header, .{}; // TODO: Footer is not being parsed yet
+    success=, footer := parse_gzip_footer(content);
+
+    return success, inflated_content, header, footer;
 }
 
 unzip :: (filename: string) -> (success: bool, unziped_content: [] u8, header: Header, footer: Footer) {
@@ -132,8 +134,9 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
     byte := content.data;
     using header: Header;
 
-    // TODO: If this is the last use of big_endian_to_little_endian() consider just removing the function and reading the bytes piecemeal
-    magic = big_endian_to_little_endian(byte, type_of(magic));
+    magic_msb: u16 = xx <<byte;
+    magic_lsb: u16 = xx <<(byte + 1);
+    magic = (magic_msb << 8) + (magic_lsb << 0);
     byte += size_of(type_of(magic));
     bytes_read += size_of(type_of(magic));
 
@@ -177,8 +180,7 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
             return false, .{}, bytes_read;
         }
 
-        // TODO: is this incorrect? timestamp was little endian...
-        extra_length = big_endian_to_little_endian(byte, type_of(extra_length));
+        memcpy(*extra_length, byte, size_of(type_of(extra_length)));
         byte += size_of(type_of(extra_length));
         bytes_read += size_of(type_of(extra_length));
 
@@ -208,7 +210,6 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
         }
 
         if !success {
-            // TODO: This error message could probably be worded better...
             log_error("GZIP   [ERROR]: FNAME flag was set, but we ran out of file data before the name could finish being read");
             return false, .{}, bytes_read;
         }
@@ -233,7 +234,6 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
         }
 
         if !success {
-            // TODO: This error message could probably be worded better...
             log_error("GZIP   [ERROR]: FCOMMENT flag was set, but we ran out of file data before the comment could finish being read");
             return false, .{}, bytes_read;
         }
@@ -252,9 +252,8 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
             return false, .{}, bytes_read;
         }
 
-        // TODO: If this parses correctly we actually should check to make sure the crc 
-        // passes (maybe add a flag to disable crc checks)
-        crc16 = big_endian_to_little_endian(byte, type_of(crc16));
+        // TODO: Check the crc16 here for validity
+        memcpy(*crc16, byte, size_of(type_of(crc16)));
         byte += size_of(type_of(crc16));
         bytes_read += size_of(type_of(crc16));
     }
@@ -262,6 +261,18 @@ parse_gzip_header :: (content: [] u8) -> (success: bool, header: Header, bytes_r
     return true, header, bytes_read;
 }
 
+parse_gzip_footer :: (content: [] u8) -> success: bool, footer: Footer {
+    footer_bytes := array_view(content, content.count - 8); // grab the last 8 bytes of the content
+
+    footer: Footer;
+    memcpy(*footer.crc32, footer_bytes.data, 4);
+    memcpy(*footer.size, footer_bytes.data + 4, 4);
+
+    // TODO: check the crc32 here for validity.
+    //
+
+    return true, footer;
+}
 
 
 
