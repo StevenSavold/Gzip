@@ -33,7 +33,7 @@
 
     // Include modules in the parent folder
     import_path: [..] string;
-    array_add(*import_path, "modules");
+    array_add(*import_path, "."); // we want to add the module that is in our current directory
     array_add(*import_path, ..options.import_path);
     options.import_path = import_path;
 
