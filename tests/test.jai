@@ -12,7 +12,7 @@
 //
 
 // TODO: remove me?
-#run main();
+// #run main();
 
 
 main :: () {
@@ -122,4 +122,4 @@ test :: (exprected_to_pass: bool, header: [] u8, payload: [] u8, expected_inflat
 }
 
 #import "Basic";
-GZ :: #import "Gzip";
+GZ :: #import,file "../module.jai";

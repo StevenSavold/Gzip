@@ -1,5 +1,5 @@
 # Gzip (Jai)
-This is a module for the Jai programming language. It implements a gzip compressor/decompressor.
+This is a module for the Jai programming language. It implements a gzip decompressor with a compressor in the works.
 
 ## Build the tests
 In the projects root folder, run the following command:

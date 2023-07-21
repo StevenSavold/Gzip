@@ -33,7 +33,7 @@
 
     // Include modules in the parent folder
     import_path: [..] string;
-    array_add(*import_path, "."); // we want to add the module that is in our current directory
+    array_add(*import_path, "../"); // we want to add the module that is in our parent directory
     array_add(*import_path, ..options.import_path);
     options.import_path = import_path;
 
@@ -51,7 +51,7 @@
     set_build_options(options, workspace);
 
     compiler_begin_intercept(workspace);
-    add_build_file("tests/test.jai", workspace);
+    add_build_file("test.jai", workspace);
 
     // Intercept compiler messages here
     //
