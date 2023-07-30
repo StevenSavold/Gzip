@@ -116,7 +116,7 @@ combine_two_payloads :: (first: [] u8, second: [] u8) -> [] u8 {
 
 test_gunzip :: (expected_to_pass: bool, header: [] u8, payload: [] u8, expected_inflated_payload: string = "") -> bool {
     defer { reset_temporary_storage(); }; // Reset the temp allocator when we are done with this test
-
+    defer { log("--------------------------"); } // Print a separator after the test is done
     // Make the test payload
     test_payload := combine_two_payloads(header, payload);
 
@@ -135,6 +135,7 @@ test_gunzip :: (expected_to_pass: bool, header: [] u8, payload: [] u8, expected_
 
 test_unzip :: (expected_to_pass: bool, header: [] u8, payload: [] u8, expected_inflated_payload: string = "") -> bool {
     defer { reset_temporary_storage(); }; // Reset the temp allocator when we are done with this test
+    defer { log("--------------------------"); } // Print a separator after the test is done
 
     // Make the test payload
     test_payload := combine_two_payloads(header, payload);
