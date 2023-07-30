@@ -38,7 +38,7 @@
     options.import_path = import_path;
 
     // Name the target executable
-    options.output_executable_name = "gzip-jai-module-tests";
+    options.output_executable_name = "test";
 
     // Setup optimizations
     set_optimization(*options, optimization_level);
