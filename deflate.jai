@@ -44,7 +44,7 @@ next :: (using state: *Parse_State) -> bool {
 // of the input_buffer
 position_bounds_check :: (using state: *Parse_State) -> bool {
     if byte >= input_buffer.count {
-        log_error("GZIP   [ERROR]: unable to parse body, no more bytes to read");
+        log_error("DEFLATE   [ERROR]: unable to parse body, no more bytes to read");
         return false;
     }
     return true;
@@ -54,7 +54,7 @@ position_bounds_check :: (using state: *Parse_State) -> bool {
 // Decompresses a binary block that is encoded using the deflate specification: https://www.ietf.org/rfc/rfc1951.txt
 inflate :: (deflated_content: [] u8) -> (success: bool, inflated_content: [] u8) {
     if deflated_content.count <= 0 {
-        log_error("GZIP   [ERROR]: unable to inflate content, input stream had no bytes");
+        log_error("DEFLATE   [ERROR]: unable to inflate content, input stream had no bytes");
         return false, .[];
     }
 
@@ -87,12 +87,12 @@ inflate :: (deflated_content: [] u8) -> (success: bool, inflated_content: [] u8)
                 success = parse_block_dynamic(*state, *output_buffer);
 
             case .ERROR;
-                log_error("GZIP   [ERROR]: encountered an invalid block type");
+                log_error("DEFLATE   [ERROR]: encountered an invalid block type");
                 return false, .[];
         }
 
         if !success {
-            log_error("GZIP   [ERROR]: error when paring block type '%'", btype);
+            log_error("DEFLATE   [ERROR]: error when paring block type '%'", btype);
             return false, .[];
         }
     }
@@ -121,7 +121,7 @@ parse_block_none :: (state: *Parse_State, output_buffer: *[..] u8) -> success: b
     state.byte += 2; // Now we move forward since we read it
 
     if len != ~nlen {
-        log_error("GZIP   [ERROR]: invalid block data, length did not match nlength");
+        log_error("DEFLATE   [ERROR]: invalid block data, length did not match nlength");
         return false;
     }
 
@@ -152,7 +152,7 @@ parse_block_fixed :: (state: *Parse_State, output_buffer: *[..] u8) -> success: 
 
         code := leaf.code;
         if !is_in_alphabet(code) {
-            log_error("GZIP   [ERROR]: invalid block data, found an invalid huffman code in block (code: %)", code);
+            log_error("DEFLATE   [ERROR]: invalid block data, found an invalid huffman code in block (code: %)", code);
             return false;
         }
 
@@ -174,7 +174,7 @@ parse_block_fixed :: (state: *Parse_State, output_buffer: *[..] u8) -> success: 
             if !success then return false;
 
             if !is_distance_code(xx distance_code) {
-                log_error("GZIP   [ERROR]: invalid block data, found invalid distance code (%)", distance_code);
+                log_error("DEFLATE   [ERROR]: invalid block data, found invalid distance code (%)", distance_code);
                 return false;
             }
 
@@ -196,7 +196,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
     hlit += 257; // Add back that 257 to the decoded value
 
     if hlit < 257 || hlit > 286 {
-        log_error("GZIP   [ERROR]: unexpected value in dynamic block, HLIT was expected to be in the range [257-287) (HLIT: %)", hlit);
+        log_error("DEFLATE   [ERROR]: unexpected value in dynamic block, HLIT was expected to be in the range [257-287) (HLIT: %)", hlit);
         return false;
     }
 
@@ -206,7 +206,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
     hdist += 1; // Add back that 1 to the decoded value
 
     if hdist < 1 || hdist > 32 {
-        log_error("GZIP   [ERROR]: unexpected value in dynamic block, HDIST was expected to be in the range [1-33) (HDIST: %)", hdist);
+        log_error("DEFLATE   [ERROR]: unexpected value in dynamic block, HDIST was expected to be in the range [1-33) (HDIST: %)", hdist);
         return false;
     }
 
@@ -216,7 +216,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
     hclen += 4; // Add back that 4 to the decoded value
 
     if hclen < 4 || hclen > 19 {
-        log_error("GZIP   [ERROR]: unexpected value in dynamic block, HCLEN was expected to be in the range [4-20) (HCLEN: %)", hclen);
+        log_error("DEFLATE   [ERROR]: unexpected value in dynamic block, HCLEN was expected to be in the range [4-20) (HCLEN: %)", hclen);
         return false;
     }
 
@@ -258,13 +258,13 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
 
         code := leaf.code;
         if !is_code_length_code(code) {
-            log_error("GZIP   [ERROR]: invalid block data, found an invalid code length code in block (code: %)", code);
+            log_error("DEFLATE   [ERROR]: invalid block data, found an invalid code length code in block (code: %)", code);
             return false;
         }
 
         // This is just to catch the edge case that we see a repeat code before we have seen any data to repeat
         if i == 0 && code == 16 {
-            log_error("GZIP   [ERROR]: invalid block data, found repeat code without having seen any other codes previously");
+            log_error("DEFLATE   [ERROR]: invalid block data, found repeat code without having seen any other codes previously");
             return false;
         }
 
@@ -282,7 +282,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
 
             for 0..repeat_count-1 { // -1 because jai for loops are inclusive
                 if i >= total {
-                    log_error("GZIP   [ERROR]: invalid block data, repeat code would cause too many codes");
+                    log_error("DEFLATE   [ERROR]: invalid block data, repeat code would cause too many codes");
                     return false;
                 }
                 combined_code_lengths[i] = combined_code_lengths[i - 1];
@@ -300,7 +300,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
 
             for 0..repeat_count-1 { // -1 because jai for loops are inclusive
                 if i >= total {
-                    log_error("GZIP   [ERROR]: invalid block data, repeat code would cause too many codes");
+                    log_error("DEFLATE   [ERROR]: invalid block data, repeat code would cause too many codes");
                     return false;
                 }
                 combined_code_lengths[i] = 0;
@@ -335,7 +335,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
 
         code := leaf.code;
         if !is_in_alphabet(code) {
-            log_error("GZIP   [ERROR]: invalid block data, found an invalid huffman code in block (code: %)", code);
+            log_error("DEFLATE   [ERROR]: invalid block data, found an invalid huffman code in block (code: %)", code);
             return false;
         }
 
@@ -360,7 +360,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
             distance_code := distance_code_leaf.code;
 
             if !is_distance_code(distance_code) {
-                log_error("GZIP   [ERROR]: invalid block data, found invalid distance code (%)", distance_code);
+                log_error("DEFLATE   [ERROR]: invalid block data, found invalid distance code (%)", distance_code);
                 return false;
             }
 
@@ -382,7 +382,7 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
 copy_bytes_from_distance :: (output_buffer: *[..] u8, length: u16, distance: u16) -> bool {
     copy_start_index: s64 = output_buffer.count - distance;
     if copy_start_index < 0 {
-        log_error("GZIP   [ERROR]: unable to copy data, distance too large (count: %, distance: %)", output_buffer.count, distance);
+        log_error("DEFLATE   [ERROR]: unable to copy data, distance too large (count: %, distance: %)", output_buffer.count, distance);
         return false;
     }
 
@@ -403,13 +403,13 @@ get_length_from_code :: (code: s16, state: *Parse_State) -> success: bool, lengt
     // it was given a separate code (285). So having these values should induce an error
     // when parsing
     if code == 284 && extra_bits_value == 31 {
-        log_error("GZIP   [ERROR]: unexpected length extra value 31 for code 284, should have been code 285");
+        log_error("DEFLATE   [ERROR]: unexpected length extra value 31 for code 284, should have been code 285");
         return false, 0;
     }
 
     length := table_data.value + extra_bits_value;
     if length > 258 || length < 3 {
-        log_error("GZIP   [ERROR]: expected length to be between 3 and 258 (it was: %)", length);
+        log_error("DEFLATE   [ERROR]: expected length to be between 3 and 258 (it was: %)", length);
         return false, 0;
     }
 
@@ -424,7 +424,7 @@ get_distance_from_code :: (code: u16, state: *Parse_State) -> success: bool, dis
 
     distance := table_data.value + extra_bits_value;
     if distance < 1 || distance > 32768 {
-        log_error("GZIP   [ERROR]: invalid distance value found (%)", distance);
+        log_error("DEFLATE   [ERROR]: invalid distance value found (%)", distance);
         return false, 0;
     }
 
@@ -517,3 +517,6 @@ Table_Data :: struct {
     value: u16;
     extra_bits: u8;
 }
+
+
+#load "huffman.jai";

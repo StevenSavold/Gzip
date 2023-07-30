@@ -6,7 +6,7 @@
 //
 create_huffman_tree :: (code_lengths: [] u8, max_huffman_code_length: u8) -> success: bool, tree: *Huffman_Node {
     if code_lengths.count > 288 {
-        log_error("GZIP   [ERROR]: unable to build huffman tree, expected code_lengths.count to be less then 288");
+        log_error("DEFLATE   [ERROR]: unable to build huffman tree, expected code_lengths.count to be less then 288");
         return false, null;
     }
 
@@ -28,7 +28,7 @@ create_huffman_tree :: (code_lengths: [] u8, max_huffman_code_length: u8) -> suc
                 ((j != cast(s8)it.length - 1) && ((<<child) != null) && ((<<child).code != -1) ) // If we have hit a terminating (leaf) node in the tree, we have a substring in our patten that is ambiguaous and the tree is invalid
             {
                 destroy_huffman_tree(root);
-                log_error("GZIP   [ERROR]: unable to build huffman tree, an ambiguity was encountered durring construction");
+                log_error("DEFLATE   [ERROR]: unable to build huffman tree, an ambiguity was encountered durring construction");
                 return false, null;
             }
 
@@ -65,7 +65,7 @@ destroy_huffman_tree :: (node: *Huffman_Node) {
 Next_Bit_Func :: #type (user_data: *void) -> (bit: u8, success: bool);
 find_huffman_code :: (tree: *Huffman_Node, next_bit_func: Next_Bit_Func, user_data: *void) -> *Huffman_Node {
     if tree == null {
-        log_error("GZIP   [ERROR]: unable to find code in huffman tree, tree pointer was null");
+        log_error("DEFLATE   [ERROR]: unable to find code in huffman tree, tree pointer was null");
         return null;
     }
 
@@ -78,7 +78,7 @@ find_huffman_code :: (tree: *Huffman_Node, next_bit_func: Next_Bit_Func, user_da
         // Choose a child based on the bit
         current = ifx bit then current.right else current.left;
         if current == null {
-            log_error("GZIP   [ERROR]: unable to find code in huffman tree, encounterd a null node when trying to find huffman code");
+            log_error("DEFLATE   [ERROR]: unable to find code in huffman tree, encounterd a null node when trying to find huffman code");
             return null;
         }
     }
@@ -89,18 +89,18 @@ find_huffman_code :: (tree: *Huffman_Node, next_bit_func: Next_Bit_Func, user_da
 // This algorithm comes from the DEFLATE specification: (https://www.ietf.org/rfc/rfc1951.txt [3.2.2])
 create_huffman_codes :: (code_lengths: [] u8, max_huffman_code_length: u8 = 15) -> success: bool, codes: [] Huffman_Code {
     if code_lengths.count > 288 {
-        log_error("GZIP   [ERROR]: unable to create huffman codes, expected code_lengths.count to be less then 288");
+        log_error("DEFLATE   [ERROR]: unable to create huffman codes, expected code_lengths.count to be less then 288");
         return false, .[];
     }
 
-    if max_huffman_code_length > 15 then log("GZIP [WARNING]: 'max_huffman_code_length' was set higher then 15. Defaulting to 15 instead."); // It should be okay to warn here, because if more then 15 lengths were provided, we will error in step [1]
+    if max_huffman_code_length > 15 then log("DEFLATE [WARNING]: 'max_huffman_code_length' was set higher then 15. Defaulting to 15 instead."); // It should be okay to warn here, because if more then 15 lengths were provided, we will error in step [1]
     max_huffman_code_length = min(max_huffman_code_length, 15);
 
     // [1] Count the number of codes for each code length...
     code_length_counts: [16] u16;
     for code_lengths {
         if it > max_huffman_code_length {
-            log_error("GZIP   [ERROR]: unable to create huffman codes, a supplied length was greater then the maximium allowed (length: %, max: %)", it, max_huffman_code_length);
+            log_error("DEFLATE   [ERROR]: unable to create huffman codes, a supplied length was greater then the maximium allowed (length: %, max: %)", it, max_huffman_code_length);
             return false, .[]; // Because we would be indexing past the end of the code_lengt_counts array
         } 
         code_length_counts[it] += 1;
