@@ -73,6 +73,3 @@ parse_zlib_header :: (compressed_content: [] u8) -> success: bool, header: Zlib_
 
     return true, header, bytes_read;
 }
-
-#scope_file
-#import "Basic";
