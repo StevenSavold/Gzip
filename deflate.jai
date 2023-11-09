@@ -140,7 +140,7 @@ parse_block_fixed :: (state: *Parse_State, output_buffer: *[..] u8) -> success: 
     lengths :: #run create_static_lengths_array();
     success, root := create_huffman_tree(lengths, 15); // We could do this at compile time if we didnt allocate the tree on the heap. It certainly would save needing to make the tree for each FIXED block. but how often are those used and will it really save all that much?
     if !success then return false;
-    defer { destroy_huffman_tree(root); }; // If we successfully made the huffman tree, we need to de-allocate it before we leave this scope
+    defer destroy_huffman_tree(root); // If we successfully made the huffman tree, we need to de-allocate it before we leave this scope
 
     while true {
         leaf := find_huffman_code(root, (user_data: *void) -> bit: u8, success: bool {
@@ -231,9 +231,6 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
         code_lengths_for_the_code_length_alphabet[code_length_order[i]] = cast(u8)length;
     }
 
-    success=, root := create_huffman_tree(code_lengths_for_the_code_length_alphabet, 7);
-    if !success then return false;
-
     // The repeat codes can use the data from the code lengths even in the distance codes section.
     // This means that there is effectivly one block of compressed code data (containing both length
     // and distance codes). The length of this block then, is our ajusted HLIT (HLIT + 257) plus our
@@ -246,65 +243,73 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
     // it will be a single array, the front section holding the code lengths for the
     // litterals, and the back section holding the code lengths for the distances.
     combined_code_lengths := NewArray(hlit + hdist, u8);
-    i := 0;
-    total := (hlit + hdist);
+    defer array_free(combined_code_lengths);
 
-    while i < total {
-        leaf := find_huffman_code(root, (user_data: *void) -> bit: u8, success: bool {
-            bit, success := get(xx user_data);
-            return bit, success;
-        }, state);
-        if leaf == null then return false;
+    {
+        success=, root := create_huffman_tree(code_lengths_for_the_code_length_alphabet, 7);
+        if !success then return false;
+        defer destroy_huffman_tree(root);
 
-        code := leaf.code;
-        if !is_code_length_code(code) {
-            log_error("DEFLATE   [ERROR]: invalid block data, found an invalid code length code in block (code: %)", code);
-            return false;
-        }
+        i := 0;
+        total := (hlit + hdist);
 
-        // This is just to catch the edge case that we see a repeat code before we have seen any data to repeat
-        if i == 0 && code == 16 {
-            log_error("DEFLATE   [ERROR]: invalid block data, found repeat code without having seen any other codes previously");
-            return false;
-        }
+        while i < total {
+            leaf := find_huffman_code(root, (user_data: *void) -> bit: u8, success: bool {
+                bit, success := get(xx user_data);
+                return bit, success;
+            }, state);
+            if leaf == null then return false;
 
-        if code >= 0 && code <= 15 {
-            // This is a litteral code, we can just plop the value into our buffer
-            combined_code_lengths[i] = xx code;
-            i += 1; // we added a code, so increment our index
-        }
-        else if code == 16 {
-            // This is the repeat code, we need to read some bits and then repeat
-            //  the last code we saw that number of times
-            success=, repeat_count := accumulate_bits(2, state);
-            if !success then return false;
-            repeat_count += 3; // The repeat count is stored as repeat_count minus 3, so we need to add that back in
+            code := leaf.code;
+            if !is_code_length_code(code) {
+                log_error("DEFLATE   [ERROR]: invalid block data, found an invalid code length code in block (code: %)", code);
+                return false;
+            }
 
-            for 0..repeat_count-1 { // -1 because jai for loops are inclusive
-                if i >= total {
-                    log_error("DEFLATE   [ERROR]: invalid block data, repeat code would cause too many codes");
-                    return false;
-                }
-                combined_code_lengths[i] = combined_code_lengths[i - 1];
+            // This is just to catch the edge case that we see a repeat code before we have seen any data to repeat
+            if i == 0 && code == 16 {
+                log_error("DEFLATE   [ERROR]: invalid block data, found repeat code without having seen any other codes previously");
+                return false;
+            }
+
+            if code >= 0 && code <= 15 {
+                // This is a litteral code, we can just plop the value into our buffer
+                combined_code_lengths[i] = xx code;
                 i += 1; // we added a code, so increment our index
             }
-        }
-        else if code == 17 || code == 18 {
-            // code 17 tells us to copy 0's 3-10 times
-            // code 18 tells us to copy 0's 11-138 times
-            extra_bits: u8 = ifx code == 17 then cast(u8)3 else cast(u8)7;
-            offset: u8 = ifx code == 17 then cast(u8)3 else cast(u8)11;
-            success=, repeat_count := accumulate_bits(extra_bits, state);
-            if !success then return false;
-            repeat_count += offset; // The repeat count is stored with an offset, make sure to add that back in
+            else if code == 16 {
+                // This is the repeat code, we need to read some bits and then repeat
+                //  the last code we saw that number of times
+                success=, repeat_count := accumulate_bits(2, state);
+                if !success then return false;
+                repeat_count += 3; // The repeat count is stored as repeat_count minus 3, so we need to add that back in
 
-            for 0..repeat_count-1 { // -1 because jai for loops are inclusive
-                if i >= total {
-                    log_error("DEFLATE   [ERROR]: invalid block data, repeat code would cause too many codes");
-                    return false;
+                for 0..repeat_count-1 { // -1 because jai for loops are inclusive
+                    if i >= total {
+                        log_error("DEFLATE   [ERROR]: invalid block data, repeat code would cause too many codes");
+                        return false;
+                    }
+                    combined_code_lengths[i] = combined_code_lengths[i - 1];
+                    i += 1; // we added a code, so increment our index
                 }
-                combined_code_lengths[i] = 0;
-                i += 1; // we added a code, so increment our index
+            }
+            else if code == 17 || code == 18 {
+                // code 17 tells us to copy 0's 3-10 times
+                // code 18 tells us to copy 0's 11-138 times
+                extra_bits: u8 = ifx code == 17 then cast(u8)3 else cast(u8)7;
+                offset: u8 = ifx code == 17 then cast(u8)3 else cast(u8)11;
+                success=, repeat_count := accumulate_bits(extra_bits, state);
+                if !success then return false;
+                repeat_count += offset; // The repeat count is stored with an offset, make sure to add that back in
+
+                for 0..repeat_count-1 { // -1 because jai for loops are inclusive
+                    if i >= total {
+                        log_error("DEFLATE   [ERROR]: invalid block data, repeat code would cause too many codes");
+                        return false;
+                    }
+                    combined_code_lengths[i] = 0;
+                    i += 1; // we added a code, so increment our index
+                }
             }
         }
     }
@@ -313,14 +318,13 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
     litteral_code_lengths := array_view(combined_code_lengths, 0, hlit);
     distance_code_lengths := array_view(combined_code_lengths, hlit, hdist);
 
-    destroy_huffman_tree(root); // We no longer need that tree data
-    root = null; // We should not be using root below this point
-
     success=, litteral_lengths_root := create_huffman_tree(litteral_code_lengths, 15);
     if !success then return false;
+    defer destroy_huffman_tree(litteral_lengths_root);
 
     success=, distance_lengths_root := create_huffman_tree(distance_code_lengths, 15);
     if !success then return false;
+    defer destroy_huffman_tree(distance_lengths_root);
 
     // All of the above, was just to get us the data to be able to decode the real data.
     // We start decoding the real data below this point...
@@ -371,9 +375,6 @@ parse_block_dynamic :: (state: *Parse_State, output_buffer: *[..] u8) -> bool {
             if !success then return false;
         }
     }
-
-    destroy_huffman_tree(litteral_lengths_root); // We no longer need the tree data
-    destroy_huffman_tree(distance_lengths_root); // We no longer need the tree data
 
     return true;
 }
